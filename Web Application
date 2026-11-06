@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LogScope - JSON Log Analyzer</title>
+<style>
+:root{--bg:#FFFFE6;--card:#E6E6D8;--chip:#D6D6C8;--ink:#2E2E2E;--mut:#4A4A4A;--line:#BDBDB0;--acc:#5F7388;--acc2:#3E5166;--err:#2B3A4A;--warn:#6D8196;--info:#A6A6A6;--vol:#A6A6A6}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;min-height:100vh;color:var(--ink);background:var(--bg);font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif}
+header{background:var(--acc);color:#FFFFE6;padding:22px 16px 18px}
+header div{max-width:1000px;margin:0 auto}
+h1{font-size:24px;margin:0;letter-spacing:.2px}h1 span{color:#CCCCCC}
+.sub{color:#E6E6DC;margin:2px 0 0}
+.dash{border:0;border-top:1px dashed #8E8E8E;margin:0}
+main{max-width:1000px;margin:0 auto;padding:22px 16px 60px}
+h2{font-size:13px;margin:0 0 10px;text-transform:uppercase;letter-spacing:.08em;color:var(--acc2)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+#drop{border:1px solid var(--acc);border-radius:6px;padding:30px 16px;text-align:center;cursor:pointer;color:var(--mut);background:#FFFFF2}
+#drop b.t{display:block;font-size:22px;color:var(--ink);margin-bottom:6px}
+#drop.over,#drop:hover{border-color:var(--acc2);box-shadow:0 0 0 3px rgba(95,115,136,.25)}
+textarea{width:100%;height:84px;margin-top:10px;background:#FFFFF2;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px;font:12px ui-monospace,Consolas,monospace}
+button,select,input[type=search]{font:inherit;color:var(--ink);background:#FFFFF2;border:1px solid var(--line);border-radius:8px;padding:6px 12px}
+button{cursor:pointer}button:hover{border-color:var(--acc)}
+button.p{background:var(--acc);border-color:var(--acc);color:#FFFFE6;font-weight:600}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.sp{flex:1}
+#status{color:var(--mut);margin-top:8px;min-height:20px;font-weight:600}#status.bad{color:var(--err)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.kpi{background:var(--chip);border:1px solid var(--line);border-radius:10px;padding:10px 12px}.kpi b{display:block;font-size:20px;color:var(--acc2)}.kpi span{color:var(--mut);font-size:12px}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--acc2);font-weight:700;font-size:12px}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+.badge{font-size:11px;font-weight:700;padding:1px 7px;border-radius:99px;display:inline-block}
+.FATAL,.ERROR{background:var(--err);color:#FFFFE6}.WARN{background:var(--warn);color:#FFFFE6}.INFO{background:var(--info);color:var(--ink)}.DEBUG,.TRACE{background:#CCCCCC;color:var(--ink)}
+code{font:12px ui-monospace,Consolas,monospace;word-break:break-word}
+tr.pat{cursor:pointer}tr.pat:hover{background:rgba(95,115,136,.14)}tr.ex td{background:rgba(0,0,0,.05);color:var(--mut)}
+.scroll{overflow-x:auto}.mut{color:var(--mut)}.legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;font-size:12px;color:var(--mut)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<header><div>
+  <h1>Log<span>Scope</span> - JSON Log Analysis</h1>
+  <p class="sub">Template mining, error-burst detection and latency percentiles. Runs fully in your browser; nothing is uploaded.</p>
+</div></header>
+<hr class="dash">
+<main>
+
+  <section class="card">
+    <div id="drop" tabindex="0"><b class="t">&#128194; Upload JSON Log File</b>Select or drop a .json / .jsonl / .log file containing your logs</div>
+    <input id="file" type="file" accept=".json,.jsonl,.ndjson,.log,.txt" hidden>
+    <textarea id="paste" placeholder='...or paste JSON logs here (one object per line, or a JSON array)'></textarea>
+    <div class="row">
+      <button class="p" id="goPaste">Analyze pasted</button>
+      <button id="demo">Load demo data</button>
+      <span class="sp"></span>
+      <label>Min level <select id="lvl"><option>TRACE</option><option selected>DEBUG</option><option>INFO</option><option>WARN</option><option>ERROR</option><option>FATAL</option></select></label>
+    </div>
+    <div id="status"></div>
+  </section>
+
+  <div id="out" hidden>
+    <section class="card"><div class="kpis" id="kpis"></div></section>
+    <section class="card"><h2>Volume and errors over time</h2><div id="chart"></div><div class="legend" id="chartLegend"></div></section>
+    <section class="card"><h2>Levels</h2><div id="levels"></div></section>
+    <section class="card" id="anCard"><h2>Anomalous error bursts</h2><div id="anomalies"></div></section>
+    <section class="card"><h2>Services and latency (ms)</h2><div class="scroll" id="services"></div></section>
+    <section class="card">
+      <div class="row" style="margin:0 0 10px"><h2 style="margin:0">Message patterns</h2><span class="sp"></span><input type="search" id="q" placeholder="Filter patterns"></div>
+      <div class="scroll" id="patterns"></div>
+    </section>
+    <section class="card" id="lateCard"><h2>New WARN/ERROR patterns in last 10% of timeline</h2><div id="late"></div></section>
+    <div class="row"><button id="dl">Download JSON summary</button></div>
+  </div>
+</main>
+
+<script>
+/* ---------------- core (DOM independent) ---------------- */
+const ALIASES = {
+  ts:["ts","time","timestamp","@timestamp","t","datetime","date"],
+  level:["level","severity","lvl","levelname","loglevel"],
+  msg:["message","msg","event","text"],
+  service:["service","logger","app","component","name","module"],
+  lat:["latency_ms","duration_ms","elapsed_ms","took_ms","latency","duration","elapsed"]
+};
+const LV = {TRACE:0,DEBUG:1,INFO:2,NOTICE:2,WARN:3,WARNING:3,ERROR:4,ERR:4,CRITICAL:5,FATAL:5,EMERG:5};
+const CANON = ["TRACE","DEBUG","INFO","WARN","ERROR","FATAL"];
+const KNOWN = new Set(Object.values(ALIASES).flat());
+
+function dig(rec, key) {
+  if (key in rec) return rec[key];
+  const lk = key.toLowerCase();
+  for (const k in rec) if (k.toLowerCase() === lk) return rec[k];
+  return undefined;
+}
+function pick(rec, field) {
+  for (const k of ALIASES[field]) { const v = dig(rec, k); if (v !== undefined && v !== null) return v; }
+  return undefined;
+}
+function parseTs(v) {
+  if (v === undefined) return null;
+  if (typeof v === "number") return v > 1e11 ? v / 1000 : v;
+  let s = String(v).trim();
+  if (/^\d+(\.\d+)?$/.test(s)) return parseTs(parseFloat(s));
+  if (/T\d\d:\d\d(:\d\d(\.\d+)?)?$/.test(s)) s += "Z";        // no zone -> assume UTC
+  const ms = Date.parse(s);
+  return isNaN(ms) ? null : ms / 1000;
+}
+function parseLevel(v) {
+  if (v === undefined) return "INFO";
+  if (typeof v === "number") return CANON[Math.min(5, Math.max(0, v >= 10 ? v / 10 - 1 : v))] || "INFO";
+  const i = LV[String(v).trim().toUpperCase()];
+  return CANON[i === undefined ? 2 : i];
+}
+const MASKS = [
+  [/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "<UUID>"],
+  [/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b/g, "<IP>"],
+  [/\b0x[0-9a-f]+\b/gi, "<HEX>"],
+  [/\b[0-9a-f]{16,}\b/gi, "<HEX>"],
+  [/(?<![\w<])\/[\w\-.]+(?:\/[\w\-.]+)*/g, "<PATH>"],
+  [/"[^"]*"|'[^']*'/g, "<STR>"],
+  [/\b\d+(?:\.\d+)?(?:ms|s|kb|mb|gb|%)?\b/gi, "<N>"]
+];
+function template(msg) {
+  let s = String(msg);
+  for (const [rx, tok] of MASKS) s = s.replace(rx, tok);
+  return s.replace(/\s+/g, " ").trim().slice(0, 160);
+}
+function toRow(rec) {
+  let msg = pick(rec, "msg");
+  if (msg === undefined) {
+    const rest = {}; for (const k in rec) if (!KNOWN.has(k.toLowerCase())) rest[k] = rec[k];
+    msg = JSON.stringify(rest).slice(0, 160);
+  } else if (typeof msg === "object") msg = JSON.stringify(msg);
+  const svc = pick(rec, "service"), lat = parseFloat(pick(rec, "lat"));
+  return { ts: parseTs(pick(rec, "ts")), lvl: parseLevel(pick(rec, "level")), msg: String(msg),
+           svc: svc === undefined ? "-" : String(svc), lat: isNaN(lat) ? null : lat };
+}
+const isObj = r => r && typeof r === "object" && !Array.isArray(r);
+function parseLine(line) { try { const r = JSON.parse(line); return isObj(r) ? r : null; } catch { return null; } }
+
+/* Streams NDJSON line by line (large files OK); a leading "[" switches to JSON-array mode. */
+async function* readRecords(blob) {
+  const first = (await blob.slice(0, 4096).text()).trimStart()[0];
+  if (first === "[") {
+    let data;
+    try { data = JSON.parse(await blob.text()); } catch (e) { throw new Error("Invalid JSON array: " + e.message); }
+    for (const r of data) yield isObj(r) ? r : null;
+    return;
+  }
+  const reader = blob.stream().getReader(), dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+      if (line) yield parseLine(line);
+    }
+  }
+  buf += dec.decode();
+  if (buf.trim()) yield parseLine(buf.trim());
+}
+async function ingest(blob) {
+  const rows = []; let bad = 0, total = 0;
+  for await (const rec of readRecords(blob)) { total++; if (!rec) bad++; else rows.push(toRow(rec)); }
+  return { rows, bad, total };
+}
+
+const median = a => { const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+function pct(sorted, p) {
+  const k = (sorted.length - 1) * p / 100, f = Math.floor(k), c = Math.ceil(k);
+  return sorted[f] + (sorted[c] - sorted[f]) * (k - f);
+}
+function latStats(v) {
+  const s = [...v].sort((a, b) => a - b);
+  return { n: s.length, p50: pct(s, 50), p95: pct(s, 95), p99: pct(s, 99), max: s[s.length - 1] };
+}
+
+function analyze(all, floor, bad, total) {
+  const rows = all.filter(r => LV[r.lvl] >= floor);
+  if (!rows.length) return null;
+  let t0 = Infinity, t1 = -Infinity, stamped = 0;
+  for (const r of rows) if (r.ts !== null) { stamped++; if (r.ts < t0) t0 = r.ts; if (r.ts > t1) t1 = r.ts; }
+  if (!stamped) t0 = t1 = null;
+
+  const levels = {}, services = {}, tm = new Map(), latAll = [], latSvc = {};
+  for (const r of rows) {
+    levels[r.lvl] = (levels[r.lvl] || 0) + 1;
+    const s = services[r.svc] || (services[r.svc] = { n: 0, err: 0 });
+    s.n++; if (LV[r.lvl] >= 4) s.err++;
+    const t = template(r.msg);
+    let e = tm.get(t);
+    if (!e) tm.set(t, e = { t, count: 0, lvl: r.lvl, first: null, ex: [] });
+    e.count++;
+    if (LV[r.lvl] > LV[e.lvl]) e.lvl = r.lvl;
+    if (r.ts !== null && (e.first === null || r.ts < e.first)) e.first = r.ts;
+    if (e.ex.length < 3 && !e.ex.includes(r.msg)) e.ex.push(r.msg.slice(0, 160));
+    if (r.lat !== null) { latAll.push(r.lat); (latSvc[r.svc] || (latSvc[r.svc] = [])).push(r.lat); }
+  }
+
+  let buckets = [], anomalies = [], bsize = null;
+  if (stamped && t1 > t0) {
+    const span = t1 - t0;
+    bsize = [1,5,10,30,60,300,600,1800,3600,21600,86400].find(c => span / c <= 60) || 86400;
+    const n = Math.floor(span / bsize) + 1;
+    buckets = Array.from({ length: n }, (_, i) => ({ t: t0 + i * bsize, tot: 0, err: 0, z: 0 }));
+    for (const r of rows) if (r.ts !== null) {
+      const b = buckets[Math.floor((r.ts - t0) / bsize)];
+      b.tot++; if (LV[r.lvl] >= 4) b.err++;
+    }
+    const errs = buckets.map(b => b.err), med = median(errs);
+    const mad = median(errs.map(e => Math.abs(e - med))) || 0.5;
+    for (const b of buckets) { b.z = 0.6745 * (b.err - med) / mad; if (b.z > 3.5 && b.err > 0) anomalies.push(b); }
+  }
+
+  const patterns = [...tm.values()].sort((a, b) => b.count - a.count);
+  let late = [];
+  if (stamped && t1 > t0) {
+    const cut = t1 - (t1 - t0) * 0.10;
+    late = patterns.filter(e => e.first !== null && e.first >= cut && LV[e.lvl] >= 3);
+  }
+  const errCount = rows.filter(r => LV[r.lvl] >= 4).length;
+  return {
+    total, bad, records: rows.length, start: t0, end: t1, bsize, buckets, anomalies, late, patterns, levels,
+    services, latency: latAll.length ? latStats(latAll) : null,
+    latBySvc: Object.fromEntries(Object.entries(latSvc).map(([k, v]) => [k, latStats(v)])),
+    errorRate: errCount / rows.length
+  };
+}
+
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function makeDemo(n = 6000) {
+  const rnd = mulberry32(7), ri = (a, b) => a + Math.floor(rnd() * (b - a + 1)), svcs = ["auth","payments","gateway","search"];
+  const gauss = () => Math.sqrt(-2 * Math.log(1 - rnd())) * Math.cos(2 * Math.PI * rnd());
+  const base = Date.UTC(2026, 9, 1, 9, 0, 0) / 1000, out = [];
+  for (let i = 0; i < n; i++) {
+    const ts = base + i * 0.6, s = svcs[ri(0, 3)], lat = Math.exp(4.2 + 0.5 * gauss()) * (s === "payments" ? 3 : 1);
+    let lvl = "INFO", msg = `GET /api/v1/items/${ri(1, 9999)} 200 in ${Math.floor(lat)}ms from 10.0.${ri(0, 9)}.${ri(1, 254)}`;
+    const r = rnd();
+    if (r < 0.04) { lvl = "WARN"; msg = `slow query took ${ri(800, 3000)}ms on table orders`; }
+    if (r < 0.015) { lvl = "ERROR"; msg = `timeout calling upstream host 10.1.0.${ri(1, 50)}`; }
+    if (i > 2400 && i < 2600 && rnd() < 0.35) { lvl = "ERROR"; msg = `db connection pool exhausted (active=${ri(95, 100)})`; }
+    if (i > n * 0.93 && rnd() < 0.05) { lvl = "ERROR"; msg = `payment ${ri(1000, 9999)} rejected: invalid signature`; }
+    if (i % 997 === 0) out.push("{corrupt line");
+    out.push(JSON.stringify({ timestamp: new Date(ts * 1000).toISOString(), level: lvl, service: s, message: msg, latency_ms: Math.round(lat * 10) / 10 }));
+  }
+  return out.join("\n");
+}
+
+/* ---------------- UI ---------------- */
+function initUI() {
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const fmtT = ts => ts === null ? "n/a" : new Date(ts * 1000).toISOString().replace("T", " ").slice(0, 19) + " UTC";
+  const f1 = x => x.toFixed(1), badge = l => `<span class="badge ${l}">${l}</span>`;
+  const table = (head, rowsHtml) => `<table><thead><tr>${head}</tr></thead><tbody>${rowsHtml}</tbody></table>`;
+  let STATE = null, RES = null;
+
+  function setStatus(msg, bad) { $("status").textContent = msg; $("status").className = bad ? "bad" : ""; }
+  async function run(blob, name) {
+    try {
+      setStatus("Reading " + name + " ...");
+      const t = performance.now();
+      const { rows, bad, total } = await ingest(blob);
+      if (!rows.length) throw new Error("No valid JSON log records found.");
+      STATE = { rows, bad, total };
+      refresh();
+      setStatus(`${name}: ${total} lines read in ${Math.round(performance.now() - t)} ms.`);
+    } catch (e) { setStatus(e.message, true); }
+  }
+  function refresh() {
+    RES = analyze(STATE.rows, LV[$("lvl").value], STATE.bad, STATE.total);
+    if (!RES) { setStatus("No records at or above this level.", true); $("out").hidden = true; return; }
+    render(RES); $("out").hidden = false;
+  }
+
+  function chart(r) {
+    const bs = r.buckets;
+    if (!bs.length) return '<p class="mut">No usable timestamps, so the time chart is unavailable.</p>';
+    const W = 900, vh = 60, eh = 110, gap = 16, n = bs.length, bw = W / n;
+    const mv = Math.max(...bs.map(b => b.tot)) || 1, me = Math.max(...bs.map(b => b.err)) || 1;
+    let s = `<svg viewBox="0 0 ${W} ${vh + eh + gap + 20}" width="100%" role="img" aria-label="Volume and errors per time bucket">`;
+    bs.forEach((b, i) => {
+      const x = i * bw + 1, w = Math.max(bw - 2, 1), tip = `<title>${fmtT(b.t)} | ${b.tot} logs | ${b.err} errors</title>`;
+      const h1 = b.tot / mv * (vh - 4), h2 = b.err / me * (eh - 4), hot = b.z > 3.5 && b.err > 0;
+      s += `<rect x="${x}" y="${vh - h1}" width="${w}" height="${h1}" fill="var(--vol)">${tip}</rect>`;
+      if (hot) s += `<rect x="${i * bw}" y="${vh + gap}" width="${bw}" height="${eh}" fill="var(--err)" opacity=".12"/>`;
+      s += `<rect x="${x}" y="${vh + gap + eh - h2}" width="${w}" height="${h2}" fill="var(--err)" opacity="${hot ? 1 : .7}">${tip}</rect>`;
+    });
+    const ty = vh + eh + gap + 14;
+    s += `<text x="0" y="${ty}" font-size="11" fill="var(--mut)">${fmtT(r.start)}</text>`;
+    s += `<text x="${W}" y="${ty}" font-size="11" text-anchor="end" fill="var(--mut)">${fmtT(r.end)}</text>`;
+    s += `<text x="4" y="12" font-size="11" fill="var(--mut)">volume (max ${mv})</text>`;
+    s += `<text x="4" y="${vh + gap + 12}" font-size="11" fill="var(--mut)">errors (max ${me})</text></svg>`;
+    return s;
+  }
+
+  function render(r) {
+    $("kpis").innerHTML = [
+      [r.records, "records parsed"], [r.bad, "malformed lines"], [(r.errorRate * 100).toFixed(2) + "%", "error rate"],
+      [r.anomalies.length, "error bursts"], [r.late.length, "late new patterns"], [r.patterns.length, "distinct patterns"]
+    ].map(([a, b]) => `<div class="kpi"><b>${a}</b><span>${b}</span></div>`).join("") +
+      `<div class="kpi" style="grid-column:1/-1"><span>${fmtT(r.start)} &rarr; ${fmtT(r.end)}${r.bsize ? " | bucket " + r.bsize + " s" : ""}</span></div>`;
+
+    $("chart").innerHTML = chart(r);
+    $("chartLegend").innerHTML = '<span><i style="background:var(--vol)"></i>volume</span><span><i style="background:var(--err)"></i>errors (ERROR + FATAL)</span><span>shaded = anomalous burst</span>';
+
+    const col = { FATAL: "var(--err)", ERROR: "var(--err)", WARN: "var(--warn)", INFO: "var(--info)", DEBUG: "#BDBDB0", TRACE: "#D6D6C8" };
+    const order = ["FATAL", "ERROR", "WARN", "INFO", "DEBUG", "TRACE"].filter(l => r.levels[l]);
+    $("levels").innerHTML = '<div style="display:flex;height:18px;border-radius:6px;overflow:hidden">' +
+      order.map(l => `<div title="${l}: ${r.levels[l]}" style="width:${r.levels[l] / r.records * 100}%;background:${col[l]}"></div>`).join("") + "</div>" +
+      '<div class="legend">' + order.map(l => `<span><i style="background:${col[l]}"></i>${l} ${r.levels[l]}</span>`).join("") + "</div>";
+
+    $("anomalies").innerHTML = r.anomalies.length
+      ? table('<th>Bucket start</th><th class="n">Errors</th><th class="n">Score</th>',
+          r.anomalies.map(b => `<tr><td>${fmtT(b.t)}</td><td class="n">${b.err}</td><td class="n">${b.z.toFixed(1)}</td></tr>`).join(""))
+      : '<p class="mut">No bursts above modified z-score 3.5.</p>';
+
+    const names = Object.keys(r.services).sort((a, b) => r.services[b].n - r.services[a].n);
+    const L = k => { const v = k ? r.latBySvc[k] : r.latency; return v ? `<td class="n">${v.n}</td><td class="n">${f1(v.p50)}</td><td class="n">${f1(v.p95)}</td><td class="n">${f1(v.p99)}</td><td class="n">${f1(v.max)}</td>` : '<td class="n" colspan="5">no latency field</td>'; };
+    $("services").innerHTML = table('<th>Service</th><th class="n">Logs</th><th class="n">Errors</th><th class="n">n</th><th class="n">p50</th><th class="n">p95</th><th class="n">p99</th><th class="n">max</th>',
+      `<tr><td><b>ALL</b></td><td class="n">${r.records}</td><td class="n">${Object.values(r.services).reduce((a, s) => a + s.err, 0)}</td>${L()}</tr>` +
+      names.map(k => `<tr><td>${esc(k)}</td><td class="n">${r.services[k].n}</td><td class="n">${r.services[k].err}</td>${L(k)}</tr>`).join(""));
+
+    drawPatterns();
+    $("lateCard").hidden = !r.late.length;
+    $("late").innerHTML = table('<th class="n">Count</th><th>Level</th><th>Pattern</th>',
+      r.late.slice(0, 15).map(e => `<tr><td class="n">${e.count}</td><td>${badge(e.lvl)}</td><td><code>${esc(e.t)}</code></td></tr>`).join(""));
+    $("anCard").hidden = false;
+  }
+
+  function drawPatterns() {
+    const q = $("q").value.trim().toLowerCase();
+    const list = RES.patterns.filter(e => !q || e.t.toLowerCase().includes(q)).slice(0, q ? 100 : 25);
+    $("patterns").innerHTML = table('<th class="n">Count</th><th>Level</th><th>Pattern (click for examples)</th>',
+      list.map((e, i) => `<tr class="pat" data-i="${i}"><td class="n">${e.count}</td><td>${badge(e.lvl)}</td><td><code>${esc(e.t)}</code></td></tr>`).join("") || '<tr><td colspan="3" class="mut">No matches.</td></tr>');
+    $("patterns").querySelectorAll("tr.pat").forEach(tr => tr.onclick = () => {
+      const nx = tr.nextElementSibling;
+      if (nx && nx.classList.contains("ex")) { nx.remove(); return; }
+      const e = list[+tr.dataset.i], x = document.createElement("tr");
+      x.className = "ex"; x.innerHTML = `<td></td><td></td><td><code>${e.ex.map(esc).join("<br>")}</code></td>`;
+      tr.after(x);
+    });
+  }
+
+  const drop = $("drop"), fileIn = $("file");
+  drop.onclick = () => fileIn.click();
+  drop.onkeydown = e => { if (e.key === "Enter" || e.key === " ") fileIn.click(); };
+  fileIn.onchange = () => fileIn.files[0] && run(fileIn.files[0], fileIn.files[0].name);
+  ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if (f) run(f, f.name); });
+  $("goPaste").onclick = () => $("paste").value.trim() ? run(new Blob([$("paste").value]), "pasted text") : setStatus("Paste some JSON logs first.", true);
+  $("demo").onclick = () => run(new Blob([makeDemo()]), "demo data");
+  $("lvl").onchange = () => STATE && refresh();
+  $("q").oninput = () => RES && drawPatterns();
+  $("dl").onclick = () => {
+    const { buckets, ...rest } = RES;
+    const url = URL.createObjectURL(new Blob([JSON.stringify({ ...rest, buckets }, null, 2)], { type: "application/json" }));
+    Object.assign(document.createElement("a"), { href: url, download: "logscope-summary.json" }).click();
+    URL.revokeObjectURL(url);
+  };
+}
+
+if (typeof document === "undefined") module.exports = { ingest, analyze, makeDemo, template, parseTs, parseLevel };
+else initUI();
+</script>
+</body>
+</html>
